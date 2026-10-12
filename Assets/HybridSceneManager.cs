@@ -176,7 +176,7 @@ public class HybridSceneManager : MonoBehaviour
     public void SpawnDynamicModel(SupabaseItem item)
     {
         if (_runner == null || !_runner.IsRunning) return;
-
+        if (_spawnedObjects.ContainsKey(item.id)) return;
         Vector3 position = new Vector3(item.pos_x, item.pos_y, item.pos_z);
         Quaternion rotation = Quaternion.Euler(item.rot_x, item.rot_y, item.rot_z);
         Vector3 scale = new Vector3(item.scale_x, item.scale_y, item.scale_z);
@@ -245,4 +245,11 @@ public class HybridSceneManager : MonoBehaviour
             }
         }
     }
+    public void RegisterExistingNetworkObject(string id, DynamicNetworkObject netObj)
+{
+    if (!_spawnedObjects.ContainsKey(id))
+    {
+        _spawnedObjects[id] = netObj;
+    }
+}
 }

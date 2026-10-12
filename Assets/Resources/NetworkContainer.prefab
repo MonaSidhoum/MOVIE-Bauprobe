@@ -49,7 +49,7 @@ MonoBehaviour:
   SortKey: 645409886
   SendPriority: 1
   EnableInterpolation: 1
-  Flags: 262402
+  Flags: 786690
   NestedObjects: []
   NetworkedBehaviours:
   - {fileID: 8740181036698413864}
@@ -68,10 +68,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Fusion.Runtime.dll::Fusion.NetworkTransform
   _stateAuthorityChangeErrorCorrectionDelta: 0
-  SyncScale: 0
-  SyncParent: 0
+  SyncScale: 1
+  SyncParent: 1
   _autoAOIOverride: 1
-  ConfigFlags: 0
+  ConfigFlags: -1
   PhysicsSettings:
     ForecastEnabled: 1
     DebugPhysics: 0

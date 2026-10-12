@@ -11,6 +11,7 @@ using UnityEngine.XR.Interaction.Toolkit;
 public class DynamicNetworkObject : NetworkBehaviour
 {
     [HideInInspector] public string supabaseId;
+    [Networked] public NetworkString<_64> SupabaseId { get; set; }
     public bool IsBeingGrabbed { get; private set; } = false;
 
     private bool _isLoaded = false;
@@ -20,13 +21,17 @@ public class DynamicNetworkObject : NetworkBehaviour
     private Quaternion _lastRotation;
     private Vector3 _lastScale;
 
-    public override void Spawned()
+public override void Spawned()
+{
+    _sceneManager = FindFirstObjectByType<HybridSceneManager>();
+    
+    // If a remote client receives this object via network sync, register it immediately
+    if (!HasStateAuthority && !string.IsNullOrEmpty(SupabaseId.ToString()))
     {
-        _sceneManager = FindFirstObjectByType<HybridSceneManager>();
-        _lastPosition = transform.position;
-        _lastRotation = transform.rotation;
-        _lastScale = transform.localScale;
+        // Register in manager if not already present
+        FindFirstObjectByType<HybridSceneManager>()?.RegisterExistingNetworkObject(SupabaseId.ToString(), this);
     }
+}
 
     public override void FixedUpdateNetwork()
     {
