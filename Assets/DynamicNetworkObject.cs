@@ -10,46 +10,63 @@ using UnityEngine.XR.Interaction.Toolkit;
 [RequireComponent(typeof(NetworkTransform))]
 public class DynamicNetworkObject : NetworkBehaviour
 {
-    [HideInInspector] public string supabaseId;
+    // Replicated state. Set via onBeforeSpawned so it is part of the FIRST snapshot.
+    // Signed Supabase URLs can be long, so use _512 (NetworkString truncates silently).
     [Networked] public NetworkString<_64> SupabaseId { get; set; }
-    public bool IsBeingGrabbed { get; private set; } = false;
+    [Networked] public NetworkString<_512> ModelUrl { get; set; }
 
-    private bool _isLoaded = false;
+    public bool IsBeingGrabbed { get; private set; }
+
+    private bool _isLoaded;
+    private bool _isLoading;
+    private float _nextRetryTime;
+    private bool _registered;
+
     private HybridSceneManager _sceneManager;
+    private Transform _modelRoot;
 
     private Vector3 _lastPosition;
     private Quaternion _lastRotation;
     private Vector3 _lastScale;
 
-public override void Spawned()
-{
-    _sceneManager = FindFirstObjectByType<HybridSceneManager>();
-    
-    // If a remote client receives this object via network sync, register it immediately
-    if (!HasStateAuthority && !string.IsNullOrEmpty(SupabaseId.ToString()))
+    public override void Spawned()
     {
-        // Register in manager if not already present
-        FindFirstObjectByType<HybridSceneManager>()?.RegisterExistingNetworkObject(SupabaseId.ToString(), this);
+        _sceneManager = FindFirstObjectByType<HybridSceneManager>();
+        TryBeginLoad();
     }
-}
 
-    public override void FixedUpdateNetwork()
+    public override void Despawned(NetworkRunner runner, bool hasState)
     {
-        // If we hold state authority and were being grabbed, check for positional changes to sync to Supabase
-        if (HasStateAuthority && IsBeingGrabbed)
+        if (_registered && _sceneManager != null)
+            _sceneManager.UnregisterNetworkObject(SupabaseId.ToString(), this);
+    }
+
+    // Safety net: if state arrived after Spawned() (or a download failed), keep trying.
+    public override void Render()
+    {
+        if (!_isLoaded && !_isLoading && Time.time >= _nextRetryTime)
+            TryBeginLoad();
+    }
+
+    private void TryBeginLoad()
+    {
+        if (_isLoaded || _isLoading) return;
+
+        string url = ModelUrl.ToString();
+        if (string.IsNullOrEmpty(url)) return;
+
+        string id = SupabaseId.ToString();
+        if (!_registered && !string.IsNullOrEmpty(id) && _sceneManager != null)
         {
-            // Transform updates are automatically synced across the network by Fusion's NetworkTransform
+            _sceneManager.RegisterExistingNetworkObject(id, this);
+            _registered = true;
         }
+
+        _isLoading = true;
+        StartCoroutine(DownloadAndInstantiateGLTF(url));
     }
 
-    public void InitializeModel(string itemId, string directUrl, Vector3 targetScale, Vector3 targetRotation)
-    {
-        supabaseId = itemId;
-        if (_isLoaded) return;
-        StartCoroutine(DownloadAndInstantiateGLTF(directUrl, targetScale, targetRotation));
-    }
-
-    private IEnumerator DownloadAndInstantiateGLTF(string url, Vector3 targetScale, Vector3 targetRotation)
+    private IEnumerator DownloadAndInstantiateGLTF(string url)
     {
         using (UnityWebRequest www = UnityWebRequest.Get(url))
         {
@@ -57,49 +74,67 @@ public override void Spawned()
 
             if (www.result != UnityWebRequest.Result.Success)
             {
-                Debug.LogError($"[Supabase Download Error]: {www.error}");
+                Debug.LogError($"[Supabase Download Error] {www.error}");
+                Fail();
                 yield break;
             }
 
-            byte[] gltfData = www.downloadHandler.data;
-            GltfImport gltf = new GltfImport();
-            var loadTask = gltf.LoadGltfBinary(gltfData, new System.Uri(url));
-
+            var gltf = new GltfImport();
+            var loadTask = gltf.LoadGltfBinary(www.downloadHandler.data, new System.Uri(url));
             while (!loadTask.IsCompleted) yield return null;
 
-            if (loadTask.Result)
+            if (loadTask.IsFaulted || !loadTask.Result)
             {
-                var instantiateTask = gltf.InstantiateMainSceneAsync(transform);
-                while (!instantiateTask.IsCompleted) yield return null;
-
-                _isLoaded = true;
-
-                transform.localScale = targetScale;
-                transform.localRotation = Quaternion.Euler(targetRotation);
-
-                FixMaterialsAndShaders();
-                SetupXRColliders();
-
-                _lastPosition = transform.position;
-                _lastRotation = transform.rotation;
-                _lastScale = transform.localScale;
-
-                Debug.Log($"[Supabase] Asset '{supabaseId}' initialized successfully via Fusion.");
+                Debug.LogError($"[GLTF] Failed to parse '{SupabaseId}'.");
+                Fail();
+                yield break;
             }
+
+            // Model lives under a child so the ROOT pose belongs solely to NetworkTransform.
+            _modelRoot = new GameObject("Model").transform;
+            _modelRoot.SetParent(transform, false);
+
+            var instTask = gltf.InstantiateMainSceneAsync(_modelRoot);
+            while (!instTask.IsCompleted) yield return null;
+
+            if (instTask.IsFaulted || !instTask.Result)
+            {
+                Fail();
+                yield break;
+            }
+
+            _isLoaded = true;
+            _isLoading = false;
+
+            FixMaterialsAndShaders();
+            SetupXRColliders();
+
+            _lastPosition = transform.position;
+            _lastRotation = transform.rotation;
+            _lastScale = transform.localScale;
+
+            Debug.Log($"[Supabase] Asset '{SupabaseId}' loaded.");
         }
+    }
+
+    private void Fail()
+    {
+        _isLoading = false;
+        _nextRetryTime = Time.time + 3f;
+        if (_modelRoot != null) Destroy(_modelRoot.gameObject);
     }
 
     private void FixMaterialsAndShaders()
     {
-        Renderer[] renderers = GetComponentsInChildren<Renderer>();
-        foreach (Renderer r in renderers)
+        foreach (Renderer r in GetComponentsInChildren<Renderer>())
         {
             r.enabled = true;
-            foreach (Material m in r.materials)
+            foreach (Material m in r.sharedMaterials)
             {
-                if (m.shader == null || m.shader.name == "Hidden/InternalErrorShader")
+                if (m != null && (m.shader == null || m.shader.name == "Hidden/InternalErrorShader"))
                 {
-                    m.shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+                    var fallback = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
+                    if (fallback != null) m.shader = fallback;
                 }
             }
         }
@@ -107,41 +142,32 @@ public override void Spawned()
 
     private void SetupXRColliders()
     {
-        MeshRenderer[] renderers = GetComponentsInChildren<MeshRenderer>();
-        foreach (var renderer in renderers)
+        foreach (var mr in GetComponentsInChildren<MeshRenderer>())
         {
-            if (renderer.GetComponent<Collider>() == null)
-            {
-                renderer.gameObject.AddComponent<BoxCollider>();
-            }
+            if (mr.GetComponent<Collider>() == null)
+                mr.gameObject.AddComponent<BoxCollider>();
         }
 
         Rigidbody rb = GetComponent<Rigidbody>();
-        if (rb == null)
-        {
-            rb = gameObject.AddComponent<Rigidbody>();
-        }
+        if (rb == null) rb = gameObject.AddComponent<Rigidbody>();
         rb.isKinematic = true;
         rb.useGravity = false;
 
-        XRGrabInteractable grabInteractable = GetComponent<XRGrabInteractable>();
-        if (grabInteractable == null)
-        {
-            grabInteractable = gameObject.AddComponent<XRGrabInteractable>();
-        }
+        XRGrabInteractable grab = GetComponent<XRGrabInteractable>();
+        if (grab == null) grab = gameObject.AddComponent<XRGrabInteractable>();
 
-        grabInteractable.useDynamicAttach = true;
-        grabInteractable.throwOnDetach = false;
+        grab.useDynamicAttach = true;
+        grab.throwOnDetach = false;
 
-        grabInteractable.selectEntered.RemoveAllListeners();
-        grabInteractable.selectEntered.AddListener((SelectEnterEventArgs args) => 
+        grab.selectEntered.RemoveAllListeners();
+        grab.selectEntered.AddListener((SelectEnterEventArgs args) =>
         {
             IsBeingGrabbed = true;
             RequestNetworkOwnership();
         });
 
-        grabInteractable.selectExited.RemoveAllListeners();
-        grabInteractable.selectExited.AddListener((SelectExitEventArgs args) => 
+        grab.selectExited.RemoveAllListeners();
+        grab.selectExited.AddListener((SelectExitEventArgs args) =>
         {
             IsBeingGrabbed = false;
             OnXRTransformEnded();
@@ -150,52 +176,45 @@ public override void Spawned()
 
     public void RequestNetworkOwnership()
     {
-        // In Fusion Shared Mode, request State Authority to move objects
+        // Requires "Allow State Authority Override" on the NetworkObject.
         if (!Object.HasStateAuthority)
-        {
             Object.RequestStateAuthority();
-        }
     }
 
     public void OnXRTransformEnded()
     {
         if (!HasStateAuthority) return;
 
-        if (transform.position != _lastPosition || 
-            transform.rotation != _lastRotation || 
+        if (transform.position != _lastPosition ||
+            transform.rotation != _lastRotation ||
             transform.localScale != _lastScale)
         {
             _lastPosition = transform.position;
             _lastRotation = transform.rotation;
             _lastScale = transform.localScale;
 
-            if (_sceneManager != null && !string.IsNullOrEmpty(supabaseId))
-            {
-                _sceneManager.UpdateObjectInSupabase(
-                    supabaseId, 
-                    transform.position, 
-                    transform.rotation, 
-                    transform.localScale
-                );
-            }
+            string id = SupabaseId.ToString();
+            if (_sceneManager != null && !string.IsNullOrEmpty(id))
+                _sceneManager.UpdateObjectInSupabase(id, transform.position, transform.rotation, transform.localScale);
         }
     }
 
+    // Called by the poll loop. Only the state authority may write the root transform;
+    // NetworkTransform then replicates it to everyone else.
     public void ApplyExternalDatabaseTransform(Vector3 newPos, Quaternion newRot, Vector3 newScale)
     {
+        if (!HasStateAuthority || IsBeingGrabbed) return;
+
         if (Vector3.Distance(transform.position, newPos) > 0.01f ||
             Quaternion.Angle(transform.rotation, newRot) > 0.1f ||
             Vector3.Distance(transform.localScale, newScale) > 0.01f)
         {
-            transform.position = newPos;
-            transform.rotation = newRot;
+            transform.SetPositionAndRotation(newPos, newRot);
             transform.localScale = newScale;
 
             _lastPosition = newPos;
             _lastRotation = newRot;
             _lastScale = newScale;
-
-            Debug.Log($"[Supabase Direct Update] Updated '{supabaseId}' transform from database.");
         }
     }
 }

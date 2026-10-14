@@ -10,7 +10,7 @@ public class SupabaseItem
 {
     public string id;
     public string model_url;
-    
+
     public float pos_x;
     public float pos_y;
     public float pos_z;
@@ -45,14 +45,17 @@ public class HybridSceneManager : MonoBehaviour
     [Header("Supabase Configuration")]
     public string supabaseUrl = "https://eunkmyopqbsqdvvqhzex.supabase.co";
     public string supabaseAnonKey = "YOUR_SUPABASE_ANON_KEY";
-    
+
     [Header("Sync Configuration")]
     public float dbPollIntervalSeconds = 2.0f;
+    [Tooltip("Ignore DB poll results for an item this long after we PATCHed it (avoids stale-read snap-back).")]
+    public float localWriteSuppressSeconds = 5.0f;
 
     [Header("Fusion Network Prefab")]
-    public NetworkObject networkedContainerPrefab; // Must be registered in Fusion Network Project Registry
+    public NetworkObject networkedContainerPrefab;
 
-    private Dictionary<string, DynamicNetworkObject> _spawnedObjects = new Dictionary<string, DynamicNetworkObject>();
+    private readonly Dictionary<string, DynamicNetworkObject> _spawnedObjects = new Dictionary<string, DynamicNetworkObject>();
+    private readonly Dictionary<string, float> _lastLocalWrite = new Dictionary<string, float>();
     private Coroutine _pollingCoroutine;
     private NetworkRunner _runner;
 
@@ -65,7 +68,6 @@ public class HybridSceneManager : MonoBehaviour
             return;
         }
 
-        // Automatically start or wait for Fusion session startup
         var result = await _runner.StartGame(new StartGameArgs
         {
             GameMode = GameMode.Shared,
@@ -73,36 +75,40 @@ public class HybridSceneManager : MonoBehaviour
             SceneManager = gameObject.AddComponent<NetworkSceneManagerDefault>()
         });
 
-        if (result.Ok)
-        {
-            Debug.Log("[Fusion] Successfully connected to Shared Mode session.");
-            StartCoroutine(FetchSceneFromSupabase());
-            StartPollingLoop();
-        }
-        else
+        if (!result.Ok)
         {
             Debug.LogError($"[Fusion] Failed to start game: {result.ErrorMessage}");
+            return;
         }
+
+        Debug.Log("[Fusion] Connected to Shared Mode session.");
+
+        // Only the Master Client seeds the room from Supabase. Late joiners receive the
+        // spawned objects (with ModelUrl/SupabaseId already in their first snapshot).
+        if (_runner.IsSharedModeMasterClient)
+            StartCoroutine(FetchSceneFromSupabase());
+
+        StartPollingLoop();
     }
 
     private void StartPollingLoop()
     {
-        if (_pollingCoroutine != null)
-        {
-            StopCoroutine(_pollingCoroutine);
-        }
+        if (_pollingCoroutine != null) StopCoroutine(_pollingCoroutine);
         _pollingCoroutine = StartCoroutine(PollSupabaseForExternalChanges());
+    }
+
+    private UnityWebRequest BuildGet(string url)
+    {
+        var www = UnityWebRequest.Get(url);
+        www.SetRequestHeader("apikey", supabaseAnonKey);
+        www.SetRequestHeader("Authorization", $"Bearer {supabaseAnonKey}");
+        return www;
     }
 
     private IEnumerator FetchSceneFromSupabase()
     {
-        string url = $"{supabaseUrl}/rest/v1/scene_objects?select=*";
-
-        using (UnityWebRequest www = UnityWebRequest.Get(url))
+        using (UnityWebRequest www = BuildGet($"{supabaseUrl}/rest/v1/scene_objects?select=*"))
         {
-            www.SetRequestHeader("apikey", supabaseAnonKey);
-            www.SetRequestHeader("Authorization", $"Bearer {supabaseAnonKey}");
-
             yield return www.SendWebRequest();
 
             if (www.result != UnityWebRequest.Result.Success)
@@ -111,63 +117,47 @@ public class HybridSceneManager : MonoBehaviour
                 yield break;
             }
 
-            string jsonResult = www.downloadHandler.text;
-            SupabaseItem[] items = JsonHelper.FromJson<SupabaseItem>(jsonResult);
+            SupabaseItem[] items = JsonHelper.FromJson<SupabaseItem>(www.downloadHandler.text);
 
-            if (items != null && items.Length > 0 && _runner != null && _runner.IsServer || _runner.IsRunning)
+            if (items != null && _runner != null && _runner.IsRunning)
             {
                 foreach (var item in items)
-                {
-                    if (!_spawnedObjects.ContainsKey(item.id))
-                    {
-                        SpawnDynamicModel(item);
-                    }
-                }
+                    SpawnDynamicModel(item);
             }
         }
     }
 
     private IEnumerator PollSupabaseForExternalChanges()
     {
-        WaitForSeconds wait = new WaitForSeconds(dbPollIntervalSeconds);
+        var wait = new WaitForSeconds(dbPollIntervalSeconds);
 
         while (true)
         {
             yield return wait;
-
             if (_runner == null || !_runner.IsRunning) yield break;
 
-            string url = $"{supabaseUrl}/rest/v1/scene_objects?select=*";
-
-            using (UnityWebRequest www = UnityWebRequest.Get(url))
+            using (UnityWebRequest www = BuildGet($"{supabaseUrl}/rest/v1/scene_objects?select=*"))
             {
-                www.SetRequestHeader("apikey", supabaseAnonKey);
-                www.SetRequestHeader("Authorization", $"Bearer {supabaseAnonKey}");
-
                 yield return www.SendWebRequest();
+                if (www.result != UnityWebRequest.Result.Success) continue;
 
-                if (www.result == UnityWebRequest.Result.Success)
+                SupabaseItem[] items = JsonHelper.FromJson<SupabaseItem>(www.downloadHandler.text);
+                if (items == null) continue;
+
+                foreach (var item in items)
                 {
-                    string jsonResult = www.downloadHandler.text;
-                    SupabaseItem[] items = JsonHelper.FromJson<SupabaseItem>(jsonResult);
+                    if (!_spawnedObjects.TryGetValue(item.id, out DynamicNetworkObject netObj) || netObj == null)
+                        continue;
+                    if (netObj.IsBeingGrabbed) continue;
 
-                    if (items != null && items.Length > 0)
-                    {
-                        foreach (var item in items)
-                        {
-                            if (_spawnedObjects.TryGetValue(item.id, out DynamicNetworkObject netObj))
-                            {
-                                if (!netObj.IsBeingGrabbed)
-                                {
-                                    Vector3 dbPos = new Vector3(item.pos_x, item.pos_y, item.pos_z);
-                                    Quaternion dbRot = Quaternion.Euler(item.rot_x, item.rot_y, item.rot_z);
-                                    Vector3 dbScale = new Vector3(item.scale_x, item.scale_y, item.scale_z);
+                    if (_lastLocalWrite.TryGetValue(item.id, out float t) &&
+                        Time.time - t < localWriteSuppressSeconds)
+                        continue;
 
-                                    netObj.ApplyExternalDatabaseTransform(dbPos, dbRot, dbScale);
-                                }
-                            }
-                        }
-                    }
+                    netObj.ApplyExternalDatabaseTransform(
+                        new Vector3(item.pos_x, item.pos_y, item.pos_z),
+                        Quaternion.Euler(item.rot_x, item.rot_y, item.rot_z),
+                        new Vector3(item.scale_x, item.scale_y, item.scale_z));
                 }
             }
         }
@@ -177,57 +167,55 @@ public class HybridSceneManager : MonoBehaviour
     {
         if (_runner == null || !_runner.IsRunning) return;
         if (_spawnedObjects.ContainsKey(item.id)) return;
+
         Vector3 position = new Vector3(item.pos_x, item.pos_y, item.pos_z);
         Quaternion rotation = Quaternion.Euler(item.rot_x, item.rot_y, item.rot_z);
         Vector3 scale = new Vector3(item.scale_x, item.scale_y, item.scale_z);
 
-        // Fusion 2 network instantiation
-        NetworkObject spawnedNetworkObject = _runner.Spawn(
-            networkedContainerPrefab, 
-            position, 
-            rotation, 
-            inputAuthority: null
-        );
+        // onBeforeSpawned runs BEFORE the first state snapshot is sent, so remote and
+        // late-joining clients see SupabaseId + ModelUrl the moment the object exists.
+        NetworkObject spawned = _runner.Spawn(
+            networkedContainerPrefab,
+            position,
+            rotation,
+            null,
+            (runner, obj) =>
+            {
+                obj.transform.localScale = scale; // replicated by NetworkTransform (Sync Scale)
 
-        DynamicNetworkObject dynamicScript = spawnedNetworkObject.GetComponent<DynamicNetworkObject>();
+                var dyn = obj.GetComponent<DynamicNetworkObject>();
+                dyn.SupabaseId = item.id;
+                dyn.ModelUrl = item.model_url;
+            });
+
+        var dynamicScript = spawned.GetComponent<DynamicNetworkObject>();
         if (dynamicScript != null)
-        {
-            dynamicScript.supabaseId = item.id;
             _spawnedObjects[item.id] = dynamicScript;
-            
-            // Initialize and download GLTF across all clients
-            dynamicScript.InitializeModel(item.id, item.model_url, scale, rotation.eulerAngles);
-        }
+        // Model download starts from DynamicNetworkObject.Spawned()/Render() on every client.
     }
 
     public void UpdateObjectInSupabase(string itemId, Vector3 position, Quaternion rotation, Vector3 scale)
     {
+        _lastLocalWrite[itemId] = Time.time;
         StartCoroutine(PatchObjectToSupabase(itemId, position, rotation, scale));
     }
 
     private IEnumerator PatchObjectToSupabase(string itemId, Vector3 position, Quaternion rotation, Vector3 scale)
     {
         string url = $"{supabaseUrl}/rest/v1/scene_objects?id=eq.{itemId}";
-        Vector3 euler = rotation.eulerAngles;
+        Vector3 e = rotation.eulerAngles;
+        var ci = System.Globalization.CultureInfo.InvariantCulture; // avoid "1,5" decimal commas
 
-        string jsonPayload = $@"{{
-            ""pos_x"": {position.x},
-            ""pos_y"": {position.y},
-            ""pos_z"": {position.z},
-            ""rot_x"": {euler.x},
-            ""rot_y"": {euler.y},
-            ""rot_z"": {euler.z},
-            ""scale_x"": {scale.x},
-            ""scale_y"": {scale.y},
-            ""scale_z"": {scale.z}
-        }}";
+        string json = "{" +
+            $"\"pos_x\":{position.x.ToString(ci)},\"pos_y\":{position.y.ToString(ci)},\"pos_z\":{position.z.ToString(ci)}," +
+            $"\"rot_x\":{e.x.ToString(ci)},\"rot_y\":{e.y.ToString(ci)},\"rot_z\":{e.z.ToString(ci)}," +
+            $"\"scale_x\":{scale.x.ToString(ci)},\"scale_y\":{scale.y.ToString(ci)},\"scale_z\":{scale.z.ToString(ci)}" +
+            "}";
 
-        using (UnityWebRequest www = new UnityWebRequest(url, "PATCH"))
+        using (var www = new UnityWebRequest(url, "PATCH"))
         {
-            byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
-            www.uploadHandler = new UploadHandlerRaw(bodyRaw);
+            www.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
             www.downloadHandler = new DownloadHandlerBuffer();
-
             www.SetRequestHeader("Content-Type", "application/json");
             www.SetRequestHeader("apikey", supabaseAnonKey);
             www.SetRequestHeader("Authorization", $"Bearer {supabaseAnonKey}");
@@ -237,19 +225,25 @@ public class HybridSceneManager : MonoBehaviour
 
             if (www.result == UnityWebRequest.Result.Success)
             {
-                Debug.Log($"[Supabase Sync] Persisted item '{itemId}' to database.");
+                _lastLocalWrite[itemId] = Time.time; // restart suppression from write completion
+                Debug.Log($"[Supabase Sync] Persisted '{itemId}'.");
             }
             else
             {
-                Debug.LogError($"[Supabase Sync Error] Failed to update '{itemId}': {www.error}");
+                Debug.LogError($"[Supabase Sync Error] '{itemId}': {www.error}");
             }
         }
     }
+
     public void RegisterExistingNetworkObject(string id, DynamicNetworkObject netObj)
-{
-    if (!_spawnedObjects.ContainsKey(id))
     {
-        _spawnedObjects[id] = netObj;
+        if (!_spawnedObjects.ContainsKey(id))
+            _spawnedObjects[id] = netObj;
     }
-}
+
+    public void UnregisterNetworkObject(string id, DynamicNetworkObject netObj)
+    {
+        if (_spawnedObjects.TryGetValue(id, out var existing) && existing == netObj)
+            _spawnedObjects.Remove(id);
+    }
 }
