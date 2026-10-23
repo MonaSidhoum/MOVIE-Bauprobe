@@ -62,3 +62,15 @@ sysinfo.txt
 # Crashlytics generated file
 crashlytics-build.properties
 
+
+# Fichiers générés par Unity / l'IDE / les builds Android
+*.slnx
+.vscode/
+.utmp/
+/Assets/Plugins/Android/*.backup*
+
+# Plastic SCM (Unity Version Control)
+.plastic/
+ignore.conf
+*.private.0
+*.private.0.meta

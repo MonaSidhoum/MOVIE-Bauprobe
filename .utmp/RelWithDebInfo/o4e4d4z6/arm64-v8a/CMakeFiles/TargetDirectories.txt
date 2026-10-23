@@ -1,5 +1,0 @@
-C:/Users/rihem/Downloads/MOVIE-Bauprobe/.utmp/RelWithDebInfo/o4e4d4z6/arm64-v8a/CMakeFiles/edit_cache.dir
-C:/Users/rihem/Downloads/MOVIE-Bauprobe/.utmp/RelWithDebInfo/o4e4d4z6/arm64-v8a/CMakeFiles/rebuild_cache.dir
-C:/Users/rihem/Downloads/MOVIE-Bauprobe/.utmp/RelWithDebInfo/o4e4d4z6/arm64-v8a/GameActivity/CMakeFiles/game.dir
-C:/Users/rihem/Downloads/MOVIE-Bauprobe/.utmp/RelWithDebInfo/o4e4d4z6/arm64-v8a/GameActivity/CMakeFiles/edit_cache.dir
-C:/Users/rihem/Downloads/MOVIE-Bauprobe/.utmp/RelWithDebInfo/o4e4d4z6/arm64-v8a/GameActivity/CMakeFiles/rebuild_cache.dir
