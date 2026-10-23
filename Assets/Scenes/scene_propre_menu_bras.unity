@@ -2002,7 +2002,7 @@ MonoBehaviour:
   Components:
   - {fileID: 798779060}
   _guid: dae4fdf6-94cd-4c5b-
---- !u!1001 &813109305
+--- !u!1001 &834960741
 PrefabInstance:
   m_ObjectHideFlags: 0
   serializedVersion: 2
@@ -2012,7 +2012,7 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 160891267571158236, guid: b653a614fa2492049b24398cf8c9e95d, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0
+      value: -0
       objectReference: {fileID: 0}
     - target: {fileID: 160891267571158236, guid: b653a614fa2492049b24398cf8c9e95d, type: 3}
       propertyPath: m_LocalPosition.y
@@ -2020,7 +2020,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 160891267571158236, guid: b653a614fa2492049b24398cf8c9e95d, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0
+      value: -0
       objectReference: {fileID: 0}
     - target: {fileID: 160891267571158236, guid: b653a614fa2492049b24398cf8c9e95d, type: 3}
       propertyPath: m_LocalRotation.w
@@ -4724,6 +4724,7 @@ MonoBehaviour:
   supabaseUrl: https://eunkmyopqbsqdvvqhzex.supabase.co
   supabaseAnonKey: sb_secret_CR01w44fBPxArE4EcyOyRA_BX8BtHjC
   dbPollIntervalSeconds: 2
+  localWriteSuppressSeconds: 5
   networkedContainerPrefab: {fileID: 8598697715866369873, guid: bb4c84cc60b3a4b44b986b3a592ca0cf, type: 3}
 --- !u!1 &1421554430 stripped
 GameObject:
@@ -6705,4 +6706,4 @@ SceneRoots:
   - {fileID: 1402797533}
   - {fileID: 1664500011}
   - {fileID: 930283408}
-  - {fileID: 813109305}
+  - {fileID: 834960741}

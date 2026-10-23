@@ -1,3 +1,4 @@
+
 using System.Collections;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -56,6 +57,7 @@ public class DynamicNetworkObject : NetworkBehaviour
         if (string.IsNullOrEmpty(url)) return;
 
         string id = SupabaseId.ToString();
+
         if (!_registered && !string.IsNullOrEmpty(id) && _sceneManager != null)
         {
             _sceneManager.RegisterExistingNetworkObject(id, this);
@@ -74,14 +76,23 @@ public class DynamicNetworkObject : NetworkBehaviour
 
             if (www.result != UnityWebRequest.Result.Success)
             {
-                Debug.LogError($"[Supabase Download Error] {www.error}");
+                Debug.LogError(
+                    $"[Supabase Download Error] HTTP {www.responseCode} - {www.error} - Réponse serveur : {www.downloadHandler?.text}"
+                );
+
                 Fail();
                 yield break;
             }
 
             var gltf = new GltfImport();
-            var loadTask = gltf.LoadGltfBinary(www.downloadHandler.data, new System.Uri(url));
-            while (!loadTask.IsCompleted) yield return null;
+
+            var loadTask = gltf.LoadGltfBinary(
+                www.downloadHandler.data,
+                new System.Uri(url)
+            );
+
+            while (!loadTask.IsCompleted)
+                yield return null;
 
             if (loadTask.IsFaulted || !loadTask.Result)
             {
@@ -95,7 +106,9 @@ public class DynamicNetworkObject : NetworkBehaviour
             _modelRoot.SetParent(transform, false);
 
             var instTask = gltf.InstantiateMainSceneAsync(_modelRoot);
-            while (!instTask.IsCompleted) yield return null;
+
+            while (!instTask.IsCompleted)
+                yield return null;
 
             if (instTask.IsFaulted || !instTask.Result)
             {
@@ -121,7 +134,9 @@ public class DynamicNetworkObject : NetworkBehaviour
     {
         _isLoading = false;
         _nextRetryTime = Time.time + 3f;
-        if (_modelRoot != null) Destroy(_modelRoot.gameObject);
+
+        if (_modelRoot != null)
+            Destroy(_modelRoot.gameObject);
     }
 
     private void FixMaterialsAndShaders()
@@ -129,12 +144,19 @@ public class DynamicNetworkObject : NetworkBehaviour
         foreach (Renderer r in GetComponentsInChildren<Renderer>())
         {
             r.enabled = true;
+
             foreach (Material m in r.sharedMaterials)
             {
-                if (m != null && (m.shader == null || m.shader.name == "Hidden/InternalErrorShader"))
+                if (m != null &&
+                    (m.shader == null ||
+                     m.shader.name == "Hidden/InternalErrorShader"))
                 {
-                    var fallback = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-                    if (fallback != null) m.shader = fallback;
+                    var fallback =
+                        Shader.Find("Universal Render Pipeline/Lit")
+                        ?? Shader.Find("Standard");
+
+                    if (fallback != null)
+                        m.shader = fallback;
                 }
             }
         }
@@ -149,17 +171,23 @@ public class DynamicNetworkObject : NetworkBehaviour
         }
 
         Rigidbody rb = GetComponent<Rigidbody>();
-        if (rb == null) rb = gameObject.AddComponent<Rigidbody>();
+
+        if (rb == null)
+            rb = gameObject.AddComponent<Rigidbody>();
+
         rb.isKinematic = true;
         rb.useGravity = false;
 
         XRGrabInteractable grab = GetComponent<XRGrabInteractable>();
-        if (grab == null) grab = gameObject.AddComponent<XRGrabInteractable>();
+
+        if (grab == null)
+            grab = gameObject.AddComponent<XRGrabInteractable>();
 
         grab.useDynamicAttach = true;
         grab.throwOnDetach = false;
 
         grab.selectEntered.RemoveAllListeners();
+
         grab.selectEntered.AddListener((SelectEnterEventArgs args) =>
         {
             IsBeingGrabbed = true;
@@ -167,6 +195,7 @@ public class DynamicNetworkObject : NetworkBehaviour
         });
 
         grab.selectExited.RemoveAllListeners();
+
         grab.selectExited.AddListener((SelectExitEventArgs args) =>
         {
             IsBeingGrabbed = false;
@@ -183,7 +212,8 @@ public class DynamicNetworkObject : NetworkBehaviour
 
     public void OnXRTransformEnded()
     {
-        if (!HasStateAuthority) return;
+        if (!HasStateAuthority)
+            return;
 
         if (transform.position != _lastPosition ||
             transform.rotation != _lastRotation ||
@@ -194,16 +224,28 @@ public class DynamicNetworkObject : NetworkBehaviour
             _lastScale = transform.localScale;
 
             string id = SupabaseId.ToString();
+
             if (_sceneManager != null && !string.IsNullOrEmpty(id))
-                _sceneManager.UpdateObjectInSupabase(id, transform.position, transform.rotation, transform.localScale);
+            {
+                _sceneManager.UpdateObjectInSupabase(
+                    id,
+                    transform.position,
+                    transform.rotation,
+                    transform.localScale
+                );
+            }
         }
     }
 
     // Called by the poll loop. Only the state authority may write the root transform;
     // NetworkTransform then replicates it to everyone else.
-    public void ApplyExternalDatabaseTransform(Vector3 newPos, Quaternion newRot, Vector3 newScale)
+    public void ApplyExternalDatabaseTransform(
+        Vector3 newPos,
+        Quaternion newRot,
+        Vector3 newScale)
     {
-        if (!HasStateAuthority || IsBeingGrabbed) return;
+        if (!HasStateAuthority || IsBeingGrabbed)
+            return;
 
         if (Vector3.Distance(transform.position, newPos) > 0.01f ||
             Quaternion.Angle(transform.rotation, newRot) > 0.1f ||

@@ -1,0 +1,111 @@
+{
+    "version": 1,
+    "name": "SpatialAnchorControls",
+    "maps": [
+        {
+            "name": "SpatialAnchors",
+            "id": "2b2d630b-11d7-450e-bcbd-ce835d1205e7",
+            "actions": [
+                {
+                    "name": "CreateAnchor",
+                    "type": "Button",
+                    "id": "26b2b382-aa02-4941-9ce8-010cd80ea0f3",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false,
+                    "priority": 0
+                },
+                {
+                    "name": "LoadAnchors",
+                    "type": "Button",
+                    "id": "39adf491-f413-42e8-94c0-00d513c400c3",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false,
+                    "priority": 0
+                },
+                {
+                    "name": "EraseAnchors",
+                    "type": "Button",
+                    "id": "20c172dd-78dc-4357-b146-760a1182b7c4",
+                    "expectedControlType": "",
+                    "processors": "",
+                    "interactions": "",
+                    "initialStateCheck": false,
+                    "priority": 0
+                }
+            ],
+            "bindings": [
+                {
+                    "name": "",
+                    "id": "a522894d-cbba-4f12-a7fc-632d0e41939a",
+                    "path": "",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "CreateAnchor",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "def7998f-6a9b-4a9b-95a3-48c8f4c170f7",
+                    "path": "<XRController>{RightHand}/primaryButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "CreateAnchor",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "b4de9de5-619e-4f32-86ae-7e09a3693db1",
+                    "path": "",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "LoadAnchors",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "fc01ca86-cbca-4a4e-b780-07d5500c2f91",
+                    "path": "<XRController>{RightHand}/secondaryButton",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "LoadAnchors",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "f8643e0c-5060-4e30-9091-a49ef565788a",
+                    "path": "",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "EraseAnchors",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                },
+                {
+                    "name": "",
+                    "id": "4113208d-36f3-4317-b9a1-6325cdcba743",
+                    "path": "<QuestTouchPlusController>{RightHand}/thumbstickClicked",
+                    "interactions": "",
+                    "processors": "",
+                    "groups": "",
+                    "action": "EraseAnchors",
+                    "isComposite": false,
+                    "isPartOfComposite": false
+                }
+            ]
+        }
+    ],
+    "controlSchemes": []
+}
